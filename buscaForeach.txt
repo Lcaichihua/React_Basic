@@ -1,0 +1,65 @@
+private void buscaForEach(int numLinea)
+        {
+
+            string cad1 = "";
+            cad1 = BuscaLinea(numLinea);
+            cad1 = cad1.ToUpper();
+            int con = numLinea;
+            //int contadorInicio = 0;
+            //int contadorFin = 0;
+
+            Boolean estado = false;
+
+            if ((cad1.Contains("FOREACH") && cad1.Contains("INTO")))
+                    
+                  
+            {
+                
+                //contadorInicio++;
+                cad1 = BuscaLinea(con).ToUpper();
+                iniForEach = con;
+               
+                estado = true;
+            }else
+            {
+                estado = false;
+            }
+           
+
+
+
+            if((cad1.Contains("END FOREACH") )
+                 && estado==false
+                 )
+            {
+
+                //contadorFin++;
+                cad1 = BuscaLinea(con).ToUpper();
+                finForEach = con;
+               
+                
+            }
+
+            if (iniForEach != 0 && finForEach != -1 )
+            {
+                do
+                {
+                    iniForEach++;
+                    cad1 = BuscaLinea(iniForEach).ToUpper();
+                    if (cad1.Contains("PREPARE") && cad1.Contains("FROM"))
+                    //&& (numLinea > iniForEach || numLinea == finForEach)
+
+                    {
+                        ErrorBE cursor = new ErrorBE("SE ENCONTRO LA SENTENCIA PREPARE DENTRO DE UN FOREACH", iniForEach);
+                        filegl.lista.Add(cursor);
+                        
+                    }
+                } while (iniForEach != finForEach);
+                finForEach = -1;
+            }
+            
+
+
+
+
+        }

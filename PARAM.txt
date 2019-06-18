@@ -1,0 +1,2154 @@
+using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Threading.Tasks;
+using System.Web;
+using System.Web.Http;
+using System.Web.Script.Serialization;
+using System.Xml;
+using VAL.Entity.BusinessEntity.Validador4GL;
+
+namespace VAL.WepApi.Controllers
+{
+    public class Validador4GLController : ApiController
+    {
+
+        List<string> fileIn;//GUARDAMOS EN LISTA ARCHIVO PARA ACCEDER A CADA LINEA
+        String dirCodigosFuentes = "Codigos4GL";
+        string filename = "##";
+        int auxLinea = 0;
+        int iniFunPrepQuery = 0;
+        int finFunPrepQuery = -1;
+        int iniForval = 0;
+        int finForval= -1;
+      
+        int totalLineas = 0;
+        int cabecera = 0;
+
+        List<ObjetoViewBE> listaJobRegla = null;
+        Log4GLBE filegl = new Log4GLBE();
+        List<String> tokensEncontrados = new List<string>();
+        List<String> openEncontrados = new List<string>();
+        List<String> closeEncontrados = new List<string>();
+        List<String> openEncontradosExe = new List<string>();
+        List<String> closeEncontradosExe = new List<string>();
+        List<String> openEncontradosExe1 = new List<string>();
+    
+        List<String> indicadoresModNoUsados = new List<String>();
+
+
+        List<ErrorIndModBE> listaInd = new List<ErrorIndModBE>();
+    
+
+
+
+        List<String> arreglo_palabras = new List<string>();
+        String[] palabrasArreglo = new String[3] { "PDQPRIORITY", "ERROR", "ECHO" };
+        String[] arregloFunciones = new string[1] { "FUNCTION" };
+        String[] arregloReturning = new string[1] { "RETURNING" };
+
+        List<String> gconstEncontrados = new List<string>();
+
+        String[] palabrasGconst = new String[1] { "g_const" };
+
+        String[] palabrasReser =
+        new String[19] { "LET", "INSERT", "DELETE", "INTO", "SELECT", "FROM", "WHERE",
+                "PREPARE","END","FUNCTION","UPDATE","EXECUTE","OPEN","CLOSE","SQLCA.SQLCODE","CALL","*","ROWID","CALL"};
+
+        String[] palaReserTipoDa =
+        new String[7] { "DECIMAL", "CHAR", "SMALLINT", "DEC", "INTEGER", "VARCHAR", "DATE"};
+
+        String[] palabrasReservadas =
+        new String[16] { "LET", "insert", "delete", "INTO", "SELECT", "FROM", "WHERE",
+                "PREPARE","END","FUNCTION","update","EXECUTE","SQLCA.SQLCODE","CALL","*","ROWID"};
+
+        String[] palabrasOpenCursor = new String[1] { "OPEN" };
+        String[] palabrasCerrarCursor = new String[1] { "CLOSE" };
+        String[] palabrasExecute = new String[2] { "execute", "into" };
+        String[] palabrasExecuteO = new String[1] { "execute" };
+        String[] palabrasDelete = new String[1] { "delete" };
+        Boolean unavez = false;
+
+       [HttpPost]
+        public async Task<IEnumerable<ErrorBE>> Read4GLFile()
+        {
+            String linea = "";
+            fileIn = new List<string>();
+            ErrorBE err = new ErrorBE();
+            ////llamamos al metodo de generar directorio
+
+            GeneraDirectorio(dirCodigosFuentes);
+            var ctx = HttpContext.Current;
+            var root = ctx.Server.MapPath("~/App_Data");
+            var provider = new MultipartFormDataStreamProvider(root);
+
+            try
+            {
+                await Request.Content.ReadAsMultipartAsync(provider);
+
+                foreach (var file in provider.FileData)
+                {
+
+                    var name = file.Headers.ContentDisposition.FileName;
+
+                    //remove double quotes from string
+                    name = name.Trim('"');
+                    filename = name;
+                    var localFileName = file.LocalFileName;
+                    var filePath = Path.Combine(root, name);
+                   
+                    if (!File.Exists(Path.Combine(@"c:\" + dirCodigosFuentes, filename)))
+                        File.Move(localFileName, Path.Combine(@"c:\" + dirCodigosFuentes, filename));
+
+                    else
+                    { 
+                        File.Delete(Path.Combine(@"c:\" + dirCodigosFuentes, filename));
+                        //File.Create(Path.Combine(@"c:\" + dirCodigosFuentes, filename));
+                        File.Move(localFileName, Path.Combine(@"c:\" + dirCodigosFuentes, filename));
+                    }
+                      
+                }
+
+                
+                StreamReader archivo = File.OpenText("C://" + dirCodigosFuentes + "/" + filename);
+
+             
+                string caracter = null;
+                int contadorLineas  = 0;
+               
+            
+                int n = 1; //SIRVE PARA AUMENTAR EL NUMERO DE LINEAS Y AYUDA EN BUSQUEDAS
+                
+                Boolean band = false;
+                Boolean ban = false;
+                Boolean anterior = false;
+                String id = "";
+                int nn = 0;
+
+               
+                totalLineas = calculaNumLineas();
+  
+               filegl.lista.Add(new ErrorBE("Total", totalLineas));
+
+
+                buscaIndModificacion(1);
+                //BUSCA LA FUNCTION PREPARA_QUERYS Y DETERMINA SU UBICACION , SI EXISTE
+              //  buscaFunPreparaQuery(contadorLineas);
+
+                while (!archivo.EndOfStream)
+                {
+                    //Leer la línea:
+                    linea = archivo.ReadLine();
+
+                    contadorLineas++;
+
+                    nn = 0;
+                    //BUSCA EL PRIMER CARACTER DE LA LINEA
+                    for (int m = 0; m < linea.Length; m++)
+                    {
+                        if (linea.Substring(m, 1) != " " && linea.Substring(m, 1) != "\t")  
+                        {
+                            caracter = linea.Substring(m, 1);
+                        }
+                    }
+                   
+                    if (cabecera < contadorLineas)
+                    {
+                        //BUSCA LOS CURSORES QUE NO SON CERRADOS CORRECTAMENTE 
+                        openEncontrados = buscarIdentCursor(linea, palabrasOpenCursor);
+                        if (openEncontrados.Count>0) {
+                            cursorNoCerrado(linea,contadorLineas);
+                        }
+
+                        //BUSCA LOS EXECUTE QUE NO SON MANEJADOS CON SQLCA.SQLCODE y 
+                        //LA PALABRA INTO
+                        openEncontradosExe = buscarTokens(linea, palabrasExecuteO);
+                        if (openEncontradosExe.Count > 0)
+                        {
+                            executeNoSQLCA(linea,contadorLineas);
+                        }
+
+                        //BUSCA EL ARREGLO DE PALABRAS-ERROR EN LA LINEA ACTUAL
+                        /*#Larry*/
+                        buscaForval(contadorLineas ,linea);
+
+                        arreglo_palabras = buscaArreglo(linea, palabrasArreglo , contadorLineas);
+                        if (arreglo_palabras.Count > 0)
+                        {
+                            encuentraArreglo(linea, contadorLineas);
+
+                        }
+                        /* avance larry */
+                        // SE VALIDA EL NOMBRE DE LA FUNCION
+                        buscarFunciones(linea, arregloFunciones, contadorLineas);
+
+                        //SE VALIDA EL RETURNING DE UNA FUNCION
+                        buscarReturning(linea, arregloReturning, contadorLineas);
+
+
+
+                        // SE VALIDA QUE LAS VARIABLES GLOBALES 
+                        // CONTENGAN EL FORMATO CORRECTO
+                        //  solo se validar una vez en el documento 
+                        //si unavez = cambia a true ya no lo hace 
+                        if (unavez ==false) {
+                            List<string> listmain = encuentra_main();
+                            listmain = encuentra_main();
+                            validarGlobales(listmain);
+                        }
+
+                       
+
+
+                          /* avance larry */
+
+                          //BUSCAR PALABRAS GCONST     
+                          gconstEncontrados = buscarIdentGconst(linea, palabrasGconst);
+                        if (gconstEncontrados.Count > 0)
+                        {
+                            encuentraGconst(linea, contadorLineas);
+
+                        }
+                        
+                        buscarIndicadoresModificacion(contadorLineas);
+
+                        
+                        buscarUsoMerge(contadorLineas);
+
+                       
+                        buscaNoUsoWithNoLog(contadorLineas);
+
+                        buscaForEachAnidados(contadorLineas);
+
+
+                    }
+                }
+                archivo.Dispose();
+
+                fileIn.Clear();
+               
+            }
+            catch (Exception e)
+            {
+                Console.Write(e.Message);
+            }
+            
+            //var json = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(filename);
+            return filegl.lista;
+          
+        }
+        private void validarGlobales(List<string> listmain ) {
+           
+            Boolean record = false;
+            List<string> lista_de_validados = new List<string>();
+            ErrorBE error_prueba =null;
+            List<ErrorBE> lista_prueba_errores = new List<ErrorBE>();
+            try
+            {
+                //validacion del array del docuemnto 
+                for (int i = 0; i < listmain.Count; i++)
+                {
+                    //  Console.Write(listmain[i]);
+                    if (listmain[i].Contains("DEFINE"))
+                    {
+                        for (int j = i + 1; j < listmain.Count ; j++)
+                        {
+                            // Console.Write("se valida");
+
+                            if (listmain[j].Contains("END") && listmain[j].Contains("RECORD"))
+                            {
+                                record = false;
+                                continue;
+                            } 
+
+                            if (!record) {
+                                if (listmain[j].Contains("RECORD") && (!listmain[j].Contains("END")))
+                                {
+                                    record = true;
+                                    continue;
+
+
+                                }
+                                else
+                                {
+                                    if (listmain[j].Contains("RECORD"))
+                                    { continue; }
+                                    else
+                                    {
+                                        
+                                        if(valida_g(listmain[j])){
+                                            error_prueba = new ErrorBE(listmain[j], j + 1);
+                                            filegl.lista.Add(error_prueba);
+                                          //  lista_prueba_errores.Add(error_prueba);
+                                        }
+                                        /*
+                                        lista_de_validados.Add(listmain[j]);
+                                        error_prueba = new ErrorBE(listmain[j], j+1);
+                                        lista_prueba_errores.Add(error_prueba);
+                                        */
+
+                                    }
+                                }
+
+                            }
+
+                        }
+                        
+
+                        /*
+                        if (listmain[j].Contains("RECORD"))
+                        {
+                            j++;
+                            while (validar!=true) {
+                                if (listmain[j].Contains("END") && listmain[j].Contains("RECORD"))
+                                {
+                                    Console.Write(listmain[j]);
+                                    validar = true;
+                                    break;
+                                }
+                                j++;
+                                Console.Write(listmain[j]);
+
+
+                            }
+                            Console.Write("se valida");
+
+                        }
+                        else
+                        {
+                            Console.Write("se valida");
+
+                        }
+                       //  ErrorBE er = valida_g();*/
+
+                    }
+
+                   
+                }
+                Console.Write(lista_prueba_errores);
+                Console.Write(lista_de_validados);
+                /*
+                foreach (string str in listmain) {
+                    if (str.Contains("DEFINE")) {
+
+                    }
+                } */
+
+                //lista_de_validados
+            }
+            catch (Exception ex)
+            {
+                //validacion si entra la try catch
+                Console.Write(ex.Message);
+            }
+
+            unavez = true;
+
+        }
+
+      private List<string> encuentra_main()
+          
+        {
+            List<string> lista_main = new List<string>();
+           
+            Console.Write(fileIn);
+            int count = 1;
+            foreach (String i in fileIn)
+            {
+                
+                if (i.Contains("MAIN"))
+                {
+                    
+                    break;
+                }else {
+                    lista_main.Add(i);
+                    count++;
+                }
+                
+              
+            }
+           
+
+            return lista_main;
+        }
+        private Boolean valida_g(String linea) {
+
+            string caracter="";
+            Boolean metrica = false;
+
+                    
+
+            for (int i = 0; i < linea.Length; i++)
+            {
+                if (linea.Length > 0)
+                {
+                    if (linea.Substring(0, 1) != "#") { 
+                    if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t" && linea.Substring(i, 1)!="," )
+                    {
+
+                        caracter += linea.Substring(i, 1);
+                       
+                        if (caracter.Length == 2) {
+                            break;
+                        }
+                    }}
+                }
+            }
+            /**/
+            try
+            {
+                if (caracter!=String.Empty) {
+                    //validaciones 
+                    if (caracter.Substring(0, 2) != "G_")
+                    {
+                        metrica = true;
+                    }
+                }
+               
+            } catch (Exception e) {
+                Console.Write(e.Message);
+            }
+
+            return metrica;
+        }
+       
+
+
+        private void buscarReturning(string linea, string[] listaReturning, int contador)
+        {
+            //variables de validacion 
+            String nombre_funcion = "";
+            String caracter = "";
+            //  int contador_funcion = 0;
+            Boolean estado_error = false; /* estado del error con respecto a el problemas */
+            ErrorBE errorbe = new ErrorBE();
+
+            //for principal  INICIO
+            for (int i = 0; i < linea.Length; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+
+                    if (linea.Substring(i, 1) == "#")
+                        break;
+
+                    else caracter += linea.Substring(i, 1); ;
+                }
+                if (existeToken(caracter, listaReturning))
+                {
+                    if ((i + 1) < linea.Length)
+                    {
+
+                        for (int j = i; j < linea.Length; j++)
+                        {
+                            if ((linea.Substring(j, 1).Equals(",")))
+                            {
+                                estado_error = false; break;
+
+                            }
+                            else { estado_error = true; }
+                        }
+
+
+                    }
+                    if (estado_error == true)
+                    {
+                        errorbe = new ErrorBE(" El RETURNING ESTA MAL", contador);
+                       filegl.lista.Add(errorbe);
+                    }
+
+                }
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals("=") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                        )
+                    {
+                        caracter = "";
+                    }
+                }
+
+
+            }
+            //FOR PRINCIPAL FIN
+
+        }
+        private void buscarFunciones(string linea, string[] listafun, int contador)
+        {
+            //variables de validacion 
+            String nombre_funcion = "";
+            String caracter = "";
+            int contador_funcion = 0;
+            Boolean estado_error = false; /* estado del error con respecto a el problemas */
+            ErrorBE errorbe = new ErrorBE();
+            //  List<String> tokens = new List<String>();
+            //for principal  INICIO
+            for (int i = 0; i < linea.Length; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+                if (existeToken(caracter, listafun))
+                {
+                    if ((i + 1) < linea.Length)
+                    {
+
+                        for (int j = i; j < linea.Length; j++)
+                        {
+                            if (contador_funcion < 6)
+                            {
+                                if ((j + 1) < linea.Length)
+                                {
+                                    Console.Write((linea.Substring(j + 1, 1)));
+                                    if (!(linea.Substring(j + 1, 1) == "\t"))
+                                    {
+                                        if (!(linea.Substring(j + 1, 1).Equals(" ")))
+                                        {
+                                            contador_funcion++;
+                                            nombre_funcion += linea.Substring(j + 1, 1);
+                                        }
+                                    }
+                                }
+                                else { break; }
+
+                            }
+                            else { break; }
+                        }
+                        if (nombre_funcion.Length > 0)
+                        {
+                            ///inicio de las validaciaone
+                            //validaciones 
+                            if ((nombre_funcion.Substring(0, 1).Equals("f", StringComparison.OrdinalIgnoreCase)) |
+                                (nombre_funcion.Substring(0, 1).Equals("p", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                try
+                                {
+                                    //validaciones del try catch
+                                    if (Int32.Parse(nombre_funcion.Substring(1, 1)).Equals(typeof(int)) |
+                                         Int32.Parse(nombre_funcion.Substring(2, 1)).Equals(typeof(int)) |
+                                             Int32.Parse(nombre_funcion.Substring(3, 1)).Equals(typeof(int)) |
+                                                 Int32.Parse(nombre_funcion.Substring(4, 1)).Equals(typeof(int)) |
+                                                    nombre_funcion.Substring(5, 1).Equals("_", StringComparison.OrdinalIgnoreCase))
+                                        estado_error = false;
+                                    else { estado_error = true; }
+                                }
+                                catch (Exception e)
+                                {
+                                    Console.Write(e.Message);
+                                    estado_error = true;
+                                }
+
+                            }
+                            else { estado_error = true; } //cambiando el estado del error 
+
+                            //fin de las vacidaciones
+                        }
+                        else { estado_error = false; }
+
+                    }
+                    if (estado_error == true)
+                    {
+                        errorbe = new ErrorBE(" LA FUNCION NO TIENE NOMBRE CORRECTO", contador);
+                        //lista.Add(errorbe);
+                        filegl.lista.Add(errorbe);
+                    }
+
+                }
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals("=") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                        )
+                    {
+                        caracter = "";
+                    }
+                }
+
+
+            }
+            //FOR PRINCIPAL FIN
+
+        }
+        private void buscaForEachAnidados(int numLinea)
+        {
+            string cad1 = "";
+            cad1 = BuscaLinea(numLinea).ToUpper();
+            int con = numLinea;
+            int contador = 0;//CONTADOR DE FOREACH
+
+            if (cad1.Contains("FOREACH") && cad1.Contains("INTO"))
+            {
+                con++;
+                contador++;
+                cad1 = BuscaLinea(con).ToUpper();
+                while (!(cad1.Contains("FOREACH") && cad1.Contains("END")) && contador==1)
+                {
+                    if (cad1.Contains("FOREACH") && cad1.Contains("INTO"))
+                    {
+                        ErrorBE cursor = new ErrorBE("FOREACH_ANIDADOS", con);
+                        filegl.lista.Add(cursor);
+                        contador++;
+                    }
+                    
+                    con++;
+                    cad1 = BuscaLinea(con).ToUpper();
+                }
+                
+            }
+
+        }
+
+        private void buscaNoUsoWithNoLog(int numLinea)
+        {
+            string cad1 = "";
+            cad1 = BuscaLinea(numLinea).ToUpper();
+            int con = numLinea;
+
+
+            if (cad1.Contains("CREATE") && cad1.Contains("TEMP") && cad1.Contains("TABLE") && !cad1.Contains("LET"))
+            {
+                con++;
+                cad1 = BuscaLinea(con).ToUpper();
+                while (buscarTokensBoolean(cad1, palaReserTipoDa) && cad1.Contains(","))
+                {
+                    
+                    con++;
+                    cad1 = BuscaLinea(con).ToUpper();
+
+                }
+
+                while ((buscarTokensBoolean(cad1, palaReserTipoDa) && !cad1.Contains(","))
+                    )
+                {
+                    
+                    con++;
+                    cad1 = BuscaLinea(con).ToUpper();
+                }
+
+
+                while (!cad1.Contains(")"))
+                {
+                    con++;
+                    cad1 = BuscaLinea(con).ToUpper();
+                }
+
+
+                if (!cad1.Contains("WITH") && cad1.Contains(")") && !cad1.Contains("LOG"))
+                {
+                    ErrorBE cursor = new ErrorBE(util.ConstanteMaestro.DES_CLASF_OBJ_WITH_NO_LOG, con);
+                    filegl.lista.Add(cursor);
+                }
+            }
+            else
+            {
+                if ( 
+                     cad1.Contains("CREATE") && cad1.Contains("TEMP") && cad1.Contains("TABLE") && cad1.Contains("LET") && cad1.Contains("(")
+                    ||
+                    (cad1.Contains("CREATE") && cad1.Contains("TEMP") && cad1.Contains("TABLE") && cad1.Contains("LET") && BuscaLinea(con + 1).ToUpper().Contains("("))
+                    
+                    )
+                {
+                    con++;
+                    cad1 = BuscaLinea(con).ToUpper();
+                    while ((buscarTokensBoolean(cad1, palaReserTipoDa) && 1 < cad1.LongCount(letra => letra.ToString() == ","))
+                          || (buscaPrimerCaracter(cad1) == "#" && (buscaPrimerCaracter(BuscaLinea(con + 1).ToUpper())=="#"))
+                          || (buscaPrimerCaracter(cad1) == "#" && (buscarTokensBoolean(BuscaLinea(con + 1).ToUpper(), palaReserTipoDa) && 1 < BuscaLinea(con + 1).ToUpper().LongCount(letra => letra.ToString() == ",")))
+                          || (buscarTokensBoolean(BuscaLinea(con + 1).ToUpper(), palaReserTipoDa) && 1 < BuscaLinea(con+1).ToUpper() .LongCount(letra => letra.ToString() == ","))
+                          || (cad1.Contains("("))
+                          || cad1.Trim().Length == 0
+                        )
+                    {
+                        
+                        con++;
+                        cad1 = BuscaLinea(con).ToUpper();
+ 
+                    }
+
+                    while (buscaPrimerCaracter(cad1) == "#"
+                         || !(cad1.Contains(")") && cad1.LongCount(letra => letra.ToString() == ",") == 1)
+                         || cad1.Trim().Length == 0
+                          )
+                    {
+                        con++;
+                        cad1 = BuscaLinea(con).ToUpper();
+                    }
+
+
+                    if (!cad1.Contains("WITH") && cad1.Contains(")") && !cad1.Contains("LOG"))
+                    {
+                        ErrorBE cursor = new ErrorBE("WITHNOLOG_LET", con);
+                        filegl.lista.Add(cursor);
+                    }
+
+                }
+            }
+        }
+
+        private void buscarUsoMerge(int numLinea)
+        {
+
+            string cad1 = "";
+            cad1 = BuscaLinea(numLinea).ToUpper();
+
+            //SI EXISTE LA FUNCION PREPARA_QUERYS
+            if (iniFunPrepQuery != 0 && finFunPrepQuery != -1)
+            {
+                if (cad1.Contains("LET") && cad1.Contains("MERGE")
+                     && (numLinea < iniFunPrepQuery || numLinea > finFunPrepQuery)
+                     )
+                {
+                    ErrorBE cursor = new ErrorBE("MERGE", numLinea);
+                    filegl.lista.Add(cursor);
+                }
+            }
+            else
+            {
+                if (cad1.Contains("LET") && cad1.Contains("MERGE"))
+                {
+                    ErrorBE cursor = new ErrorBE("MERGE NO EXISTE PREPARA", numLinea);
+                    filegl.lista.Add(cursor);
+                }
+            }    
+        }
+
+        private int calculaNumLineas()
+        {
+            
+
+            StreamReader archivo = System.IO.File.OpenText("C://" + dirCodigosFuentes + "/" + filename);
+            int i = 0;
+         
+            string linea = archivo.ReadLine().Trim();
+           
+            while (!archivo.EndOfStream)
+            {
+                fileIn.Add(linea.ToUpper());
+                i++;
+                linea = archivo.ReadLine().Trim();
+            }
+            Console.Write(fileIn);
+            
+            archivo.Close();
+
+            return i;
+        }
+
+        private void buscaFunPreparaQuery(int numero)
+        {
+            string cad1 = "";
+            cad1 = BuscaLinea(this.cabecera);
+            cad1 = cad1.ToUpper();
+            int numLinea = numero;
+            Boolean estado = false;
+
+            while (!(cad1.Contains("FUNCTION") && cad1.Contains("PREPARA_QUERYS"))
+                    && numLinea <= totalLineas
+                  )
+            {
+                numLinea = numLinea + 1;
+                cad1 = BuscaLinea(numLinea).ToUpper();
+            }
+            if (numLinea<=totalLineas) {
+                estado = true;//ENCONTRO LA FUNCION, EXISTE LA FUNCION PREPARA_QUERYS
+                iniFunPrepQuery = numLinea;
+                filegl.lista.Add(new ErrorBE("INICIO PREPARA_QUERYS", iniFunPrepQuery));
+                numLinea = iniFunPrepQuery;
+            }
+          
+           
+            while (!(cad1.Contains("FUNCTION") && cad1.Contains("END"))
+                 && numLinea <= totalLineas && estado            
+                 )
+            {
+                numLinea = numLinea + 1;
+                cad1 = BuscaLinea(numLinea).ToUpper();
+            }
+
+            if (estado)
+            {
+                finFunPrepQuery = numLinea;
+                filegl.lista.Add(new ErrorBE("FIN PREPARA_QUERYS", finFunPrepQuery));
+            }
+
+        }
+
+        private void buscarIndicadoresModificacion(int numlinea)
+        {
+            string cad1 = "";
+            cad1 = BuscaLinea(numlinea); 
+
+            for (int i = 0; i < filegl.indMod.Count; i++)
+            {
+                cad1 = cad1.ToUpper();
+                //AGREGA LOS INDMODIFICACION QUE SON USADOS PARA DESPUES SABER CUALES SON SOLO DECLARADOS PERO
+                //NO USADOS
+              
+                if (cad1.Contains(filegl.indMod.ElementAt(i).identificador) && cad1.Contains("INICIO")
+                    && !buscarTokensBoolean(cad1, palabrasReser)
+                    )
+                {
+                    //this.listaInd.Add(new ErrorIndModBE(indicadoresMod.ElementAt(i).identificador, numlinea, 1, 0 , 1));
+                    filegl.indMod.ElementAt(i).numeroLinea = numlinea;
+                    filegl.indMod.ElementAt(i).inicio =1;
+                    filegl.indMod.ElementAt(i).palabraReservada = 0;
+                    filegl.indMod.ElementAt(i).indicadorUsado = 1;
+                    ErrorBE cursor = new ErrorBE(filegl.indMod.ElementAt(i).identificador, numlinea);
+                    filegl.lista.Add(cursor);
+                }
+                else
+                { 
+                    if (cad1.Contains(filegl.indMod.ElementAt(i).identificador)
+                        && buscarTokensBoolean(cad1, palabrasReser)
+                        && cad1.Contains("INICIO"))
+                    {
+                        // this.listaInd.Add(new ErrorIndModBE(indicadoresMod.ElementAt(i).identificador, numlinea, 0, 1,1));
+                        filegl.indMod.ElementAt(i).numeroLinea = numlinea;
+                        filegl.indMod.ElementAt(i).inicio = 1;
+                        filegl.indMod.ElementAt(i).palabraReservada = 1;
+                        filegl.indMod.ElementAt(i).indicadorUsado = 1;
+                        ErrorBE cursor = new ErrorBE(filegl.indMod.ElementAt(i).identificador, numlinea);
+                        filegl.lista.Add(cursor);
+                    }
+
+                }
+            }
+
+         
+
+            //BUSCA EL IND DE MODIFICACION CON ETIQUETA FIN, SINO LO ENCUENTRA 
+            //NO SE RETIRA DE LA LISTA
+            cad1 = BuscaLinea(numlinea).ToUpper();
+            for (int i = 0; i < filegl.indMod.Count; i++)
+            {
+
+                if (cad1.Contains(filegl.indMod.ElementAt(i).identificador) && cad1.Contains("FIN")
+                    && filegl.indMod.ElementAt(i).palabraReservada == 0
+                    )
+                {
+
+                    for (int ii = 0; ii < filegl.lista.Count; ii++)
+                    {
+                        if (filegl.indMod.ElementAt(i).identificador.
+                            Equals(filegl.lista.ElementAt(ii).descripcion, StringComparison.OrdinalIgnoreCase))
+                        {
+
+                            filegl.lista.RemoveAt(ii);
+                        }
+
+                    }
+                    //listaInd.RemoveAt(i);
+
+                }
+
+            }
+        }
+
+        private void buscaIndModificacion(int numLinea)
+        {
+            int n = numLinea;
+            String indicador1, indicador2 = "";
+            int longitud = 0;
+
+            while (!buscarTokensBoolean(BuscaLinea(n), "DATABASE"))
+            {
+                
+                if ((buscarTokens(BuscaLinea(n)).Count > 1))
+                {
+                    indicador1 = buscarTokens(BuscaLinea(n)).ElementAt(0);
+                    indicador2 = buscarTokens(BuscaLinea(n)).ElementAt(1);
+                    longitud = indicador1.Length;
+                    if (indicador1.Length == 8 && indicador1.Substring(0, 1) == "#" &&
+                        indicador1.Substring(1, 1) == "(")
+                    {
+                        filegl.indMod.Add(new ErrorIndModBE(indicador1.Substring(1, longitud - 1)));
+                        //list.Add(new ErrorBE(indicador1.Substring(1, longitud - 1), n));
+                    }
+                    else
+                    {
+                        if (indicador1.Substring(0, 1) == "#" && indicador2.Substring(0, 1) == "(")
+                        {
+                            filegl.indMod.Add(new ErrorIndModBE(indicador2));
+                            //list.Add(new ErrorBE(indicador2,n));
+                        }
+
+                    }
+                }
+
+                n = n + 1;
+            }
+            cabecera = n;
+        }
+
+
+        public Boolean buscarTokensBoolean(String linea,string[] palabrasReservadas)
+        {
+            Boolean bandera = false;
+            linea = linea.ToUpper();
+
+            for (int i = 0; i < palabrasReservadas.Length; i++)
+            {
+                if (linea.Contains(palabrasReservadas[i]))
+                {
+                    bandera = true;
+                }
+            }
+
+            return bandera;
+
+         
+
+        }
+
+
+        public Boolean buscarTokensBoolean(String linea, String palabrasReservadas)
+        {
+
+            String caracter = "";
+            String tokens = null;
+            Boolean estado = false;
+
+            for (int i = 0; i < linea.Length && !estado; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t" &&
+                    linea.Substring(i, 1) != ",")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+                if (equalString(caracter, palabrasReservadas))
+                {
+                    tokens = caracter;
+                    caracter = "";
+                    estado = true;
+
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") || (linea.Substring(i + 1, 1).Equals("=") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals(",") && caracter != ""))
+                    {
+                        caracter = "";
+
+                    }
+                }
+            }
+
+            return estado;
+
+        }
+
+
+
+        public List<String> buscarTokens(String linea)
+        {//PASAR 
+
+            String caracter = "";
+
+            List<String> tokens = new List<String>();
+
+            for (int i = 0; i < linea.Length; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "")// ||
+                                                                                 //(linea.Substring(i + 1, 1).Equals("=") && caracter != "") 
+                        || (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                        )
+                    {
+                        tokens.Add(caracter);
+                        caracter = "";
+                    }
+                }
+                else
+                {
+                    if ((i + 1) == linea.Length)
+                        tokens.Add(caracter);
+                }
+
+            }
+
+            return tokens;
+
+        }
+
+       
+        public void executeNoSQLCA(string linea,int contadorLineas){
+            int num = 0;
+            Boolean ban = false;
+            Boolean anterior = false;
+            Boolean band = false;
+            String id = "";
+            int n = 1;
+
+            openEncontradosExe = buscarTokens(linea, palabrasExecute);
+
+            if (openEncontradosExe.Count == 1)
+            {
+
+                if (openEncontradosExe[0].Equals("execute", StringComparison.OrdinalIgnoreCase))
+                {
+                    num++;
+                    //EXISTE "INTO" en la linea que sigue
+                    if (buscaPrimerToken(BuscaLinea(contadorLineas + 1)).
+                                Equals("into", StringComparison.OrdinalIgnoreCase))
+                    {
+                        id = buscarIdentCursor(BuscaLinea(contadorLineas + 1), "into");
+
+                        band = true;
+                        n = 1;
+
+                        //BUSCA EL IDENTIFICADOR DESPUES DEL INTO en la siguiente execute
+                        //encontrado, EN LAS SIGUIENTES 3 lineas
+
+                        while (n < 4 && band)
+                        {
+                            if (buscarTokens(BuscaLinea(contadorLineas + n), "execute") != null)
+                            {   //EL PRIMER EXECUTE ESTA RELACIONADO CON EL SIGUIENTE EXECUTE
+
+                                if (buscarTokens(BuscaLinea(contadorLineas + n), id) != null)
+                                {
+                                    num++;
+                                    band = false;
+                                    anterior = true;
+                                }
+
+                            }
+                            n++;
+                        }
+                        if (num == 1)
+                        //no estan relacionados dos execute seguidos
+                        {   //SI YA ESTA EL ERROR REGISTRADO, YA NO AGREGARLO NUEVAMENTE.
+                            //&& si execute esta ligado con execute anterior, entonces no
+                            //agregar
+                            //SE AGREGA
+                            if (!existeErrorLinea(filegl.lista, contadorLineas))
+                            {
+                                ErrorBE cursor = new ErrorBE("execute",contadorLineas );
+                                filegl.lista.Add(cursor);
+                                //MessageBox.Show("%% "+contadorLineas);
+
+                            }
+
+                        }
+                    }
+                    else
+                    {
+                        ErrorBE cursor = new ErrorBE("execute",contadorLineas );
+                        filegl.lista.Add(cursor);
+
+                    }
+
+                }
+            }//termina solo execute
+            else
+            {   //CUANDO EXECUTE E INTO ESTAN EN UNA MISMA LINEA
+                if (openEncontradosExe.Count == 2)
+                {
+                    if (openEncontradosExe[0].Equals("execute", StringComparison.OrdinalIgnoreCase))
+                    {
+                        num = 1;
+
+                        //MessageBox.Show("# "+(contadorLineas)+openEncontradosExe[1].Equals("into", StringComparison.OrdinalIgnoreCase));
+                        if (openEncontradosExe[1].Equals("into", StringComparison.OrdinalIgnoreCase))
+                        {   //BUSCA EL IDENTIFICADOR DESPUES DEL INTO, PARA DESPUES BUSCARLO
+                            //EN LAS LINEAS QUE VIENEN
+                            id = buscarIdentCursor(linea, "into");
+                            //MessageBox.Show("//"+id+" "+contadorLineas+);                                      
+                            if (id != null)
+                            {
+                                band = true;
+                                n = 1;
+
+                                //BUSCA EL IDENTIFICADOR DESPUES DEL INTO, EN LAS SIGUIENTES 3
+                                //LINEAS
+                                while (n < 4 && band)
+                                {
+                                    if (buscarTokens(BuscaLinea(contadorLineas + n), "execute") != null)
+                                    {   //EL PRIMER EXECUTE ESTA RELACIONADO CON EL SIGUIENTE EXECUTE
+
+                                        if (buscarTokens(BuscaLinea(contadorLineas + n), id) != null)
+                                        {
+                                            num++;
+                                            band = false;//SI ENCONTRO UN EXECUTE YA NO BUSCA OTRO Y SALE
+                                            anterior = true;
+                                            //MessageBox.Show("misma linea .." + (contadorLineas + n ));
+
+                                        }
+
+                                    }
+                                    n++;
+                                }
+                                //**********FIN DEL WHILE**********
+
+                                if (num == 1)//no estan relacionados dos execute seguidos
+                                {   //SI YA ESTA EL ERROR REGISTRADO, YA NO AGREGARLO NUEVAMENTE.
+                                    //si execute esta ligado con execute anterior, entonces no
+                                    //agregar
+                                    //el actual execute
+                                    if (!existeErrorLinea(filegl.lista, contadorLineas) && !anterior)
+                                    {
+                                        ErrorBE cursor = new ErrorBE("execute",contadorLineas );
+                                        filegl.lista.Add(cursor);
+                                        auxLinea = contadorLineas;
+                                        //MessageBox.Show("agrego" + (contadorLineas));
+                                    }
+
+                                }
+                                else
+                                    if (num == 2)//si estan relacionados dos execute seguidos
+                                    {
+                                    //Error cursor = new Error(contadorLineas , "execute");
+                                    //listaSqlca.Add(cursor);
+                                    //auxLinea = contadorLineas;
+                                    }
+                            }
+                        }
+                    }
+
+
+                }//FIN, EN LINEA HAY EXECUTE E INTO
+
+            }
+            //BUSCA LA CLAUSULA SQLCA DE LOS EXECUTE que no tienen SQLCA
+            closeEncontradosExe = new List<String>();
+            ban = false;//DEJO EN LA LISTA EL ERROR, PARA VALOR "false"
+            Boolean estado = false;
+            n = 1;
+
+            closeEncontradosExe = buscarTokens(BuscaLinea((contadorLineas + n)), palabrasReservadas);
+            while (!(existeToken(closeEncontradosExe, "prepare")) &&
+                   !((existeToken(closeEncontradosExe, "END")) && (existeToken(closeEncontradosExe, "FUNCTION"))) &&
+                   !(((existeToken(closeEncontradosExe, "let")) && (existeToken(closeEncontradosExe, "select")))) &&
+                   !((existeToken(closeEncontradosExe, "let")) && (existeToken(closeEncontradosExe, "insert"))) &&
+                   !((existeToken(closeEncontradosExe, "let")) && (existeToken(closeEncontradosExe, "update"))) &&
+                   !estado && !ban
+                   )//SI ENCUENTRA UNA DE ESTAS ALTERNATIVAS 
+            {
+
+                if (closeEncontradosExe.Count > 0)
+                {
+                    //PARA EL EXECUTE ACTUAL,BUSCA QUE SU ID ESTE SIENDO UTILIZADO EN 
+                    //EXECUTE SIGUIENTE
+                    if ((existeToken(closeEncontradosExe, "EXECUTE")
+                         && (buscarTokens(BuscaLinea(contadorLineas + n), id) != null) && anterior))
+                    {
+                        anterior = false;//SE RESTABLECE EL VALOR 
+                        estado = true;//con este valor salto el execute actual que esta ligado con el sgte
+
+                    }
+
+                    else
+                    {   //BUSCA EL SQLCA.SQLCODE 
+                        //g_sqlc < g_cero... ESTA EN PRIMERA LINEA QUE SIGUE O EN SEGUNDA LINEA QUE SIGUE
+                        if ((existeToken(closeEncontradosExe, "SQLCA.SQLCODE")) &&
+                            !buscaPrimerCaracter(BuscaLinea(contadorLineas + n)).Equals("#") &&
+                            ((buscarTokens(BuscaLinea(contadorLineas + n + 1), "<")) != null && ((buscarTokens(BuscaLinea(contadorLineas + n + 1), "g_cero"))) != null && (!buscaPrimerCaracter(BuscaLinea(contadorLineas + n + 1)).Equals("#")) || (((buscarTokens(BuscaLinea(contadorLineas + n + 2), "<")) != null && ((buscarTokens(BuscaLinea(contadorLineas + n + 2), "g_cero"))) != null && (!buscaPrimerCaracter(BuscaLinea(contadorLineas + n + 2)).Equals("#")))))
+                            )
+                        {
+                            ban = true;//PARA QUITAR DE DE LISTA DE ERRORES
+                            estado = true;
+
+                        }
+
+                    }
+                }
+
+                n++;
+                //SE BUSCA TOKENS QUE INDIQUEN QUE NO SE ENCONTRO SQLCA.SQLCODE
+                closeEncontradosExe = buscarTokens(BuscaLinea((contadorLineas + n)), palabrasReservadas);
+
+            }
+
+            if (ban == true && filegl.lista.Count > 0)
+            {   //EL METODO buscaEnLista devuelve el indice que hace referencia a la posicion
+                //en que se encuentra el error con numero de linea=contadorLineas
+                if (buscaEnLista(filegl.lista, contadorLineas) != 999)
+                {
+                    filegl.lista.RemoveAt(buscaEnLista(filegl.lista, contadorLineas));
+                    //MessageBox.Show("quito" + (contadorLineas));
+
+                }
+
+            }
+
+
+        }
+
+
+        public List<ErrorBE> cursorNoCerrado(String linea,int contadorLineas) {
+            String aux1, aux2 = null;
+
+            for (int i = 0; i < openEncontrados.Count; i++)
+            {
+                ErrorBE cursor = new ErrorBE(openEncontrados[i], contadorLineas);
+                filegl.lista.Add(cursor);
+            }
+            //BUSCA LA CLAUSULA CLOSE DE LOS CURSORES QUE YA ESTAN ABIERTOS
+            closeEncontrados = buscarIdentCursor(linea, palabrasCerrarCursor);
+            for (int i = 0; i < closeEncontrados.Count; i++)
+            {
+                aux1 = (closeEncontrados.ElementAt(i));
+                for (int j = 0; j < filegl.lista.Count; j++)
+                {
+                    aux2 = filegl.lista.ElementAt(j).descripcion;
+                    if (aux1.Equals(aux2, StringComparison.OrdinalIgnoreCase))
+                    {
+                        filegl.lista.RemoveAt(j);
+
+                    }
+                }
+            }
+
+
+            return filegl.lista;
+        }
+
+
+
+        public String BuscaLinea(int numero)
+        {
+            //StreamReader archivo = File.OpenText("C://projects/"+);
+            //StreamReader archivo = System.IO.File.OpenText("C://" + dirCodigosFuentes + "/" + filename);
+
+            string linea = null;
+            int i = numero - 1;
+            if( i <fileIn.Count() )
+            {
+              
+                linea = fileIn.ElementAt(i);
+               // if (++i == numero) break;
+            }
+            return linea;
+        }
+
+
+        public void GeneraDirectorio(String nombre)
+        {
+
+            String path = @"c:\" + nombre;
+
+            try
+            {
+                //validamos si existe el directorio 
+                if (Directory.Exists(path))
+                {
+                    return;
+                }
+                else
+                {   //generasmos el directorio
+                    DirectoryInfo di = Directory.CreateDirectory(path);
+                }
+
+            }
+            catch (Exception ex)
+            {
+
+                Console.WriteLine("Se produjo un error al momento de crear el directorio");
+            }
+        }
+
+
+        public Boolean existeToken(List<String> lista, String ident)
+        {
+            Boolean band = false;
+
+            for (int i = 0; i < lista.Count; i++)
+            {
+                if (lista.ElementAt(i).Equals(ident, StringComparison.OrdinalIgnoreCase))
+                {
+                    band = true;
+                }
+
+            }
+
+            return band;
+        }
+
+
+        public int buscaEnLista(List<ErrorBE> lista, int numero)
+        {
+            int aux = 999;
+
+            for (int i = 0; i < lista.Count; i++)
+            {
+                if (lista.ElementAt(i).numeroLinea == numero)
+                    aux = i;
+            }
+
+            return aux;
+        }
+
+        public Boolean existeToken(String cadena, String[] palabrasReservadas)
+        {
+            string ch = "";
+            
+
+            Boolean bandera = false;
+
+            for (int i = 0; i < palabrasReservadas.Length; i++)
+            { 
+                if (cadena.Equals(palabrasReservadas[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    bandera = true;
+                }
+            }
+
+            return bandera;
+        }
+
+
+        public Boolean existeErrorLinea(List<ErrorBE> lista, int numero)
+        {
+            Boolean band = false;
+
+            for (int i = 0; i < lista.Count; i++)
+            {
+                if (lista.ElementAt(i).numeroLinea == numero)
+                    band = true;
+            }
+
+            return band;
+        }
+
+        public List<String> buscarIdentCursor(String linea, String[] palabrasReservadas)
+        {
+
+            String caracter = "";
+            String IdCursor = "";
+            Boolean estado = false;
+
+            List<String> tokens = new List<String>();
+            for (int i = 0; i < linea.Length && !estado; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+                if (existeToken(caracter, palabrasReservadas))
+                {
+                    //BUSCA IDENTIFICADOR DEL CURSOR
+                    //INICIO
+                    int jj = 0;
+                    for (int j = i + 1; j < linea.Length && !estado ; j++)
+                    {
+                        if (linea.Substring(j, 1) != " " && linea.Substring(j, 1) != "\t")
+                        {
+                            IdCursor += linea.Substring(j, 1);
+                        }
+
+                        if ((j + 1) < linea.Length)
+                        {
+                            //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+
+                            if ((linea.Substring(j + 1, 1).Equals(" ") && caracter != "")
+                                || (linea.Substring(j + 1, 1).Equals("=") && caracter != "")
+                                 || (linea.Substring(j + 1, 1).Equals("#") && caracter != "")
+                                 || (linea.Substring(j + 1, 1).Equals("\t") && caracter != "")
+                                )
+                            {
+                                estado = true;
+                            }
+                        }
+
+
+                    }//FIN DE BUSQUEDA DEL IDENTIFICADOR DEL CURSOR
+
+                    tokens.Add(IdCursor);
+                    caracter = "";
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") 
+                        || (linea.Substring(i + 1, 1).Equals("=") && caracter != "")
+                         || (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                        )
+                    {
+                        caracter = "";
+                    }
+                }
+            }
+
+            return tokens;
+        }
+
+
+        public String buscarIdentCursor(String linea, String palabrasReservadas)
+        {
+            String caracter = "";
+            String IdCursor = "";
+            String token = "";
+            Boolean estado = false;
+
+            for (int i = 0; i < linea.Length && !estado; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+                if (equalString(caracter, palabrasReservadas))
+                {
+                    //BUSCA IDENTIFICADOR DEL CURSOR
+                    //INICIO
+                    for (int j = i + 1; j < linea.Length && !estado; j++)
+                    {
+
+                        if (linea.Substring(j, 1) != " " && linea.Substring(j, 1) != "\t")
+                        {
+                            IdCursor += linea.Substring(j, 1);
+
+                        }
+                        if ((j + 1) < linea.Length)
+                            if ((linea.Substring(j + 1, 1) == "," && IdCursor != "")
+                                || (linea.Substring(j + 1, 1).Equals(" ") && caracter != "")
+                                || IdCursor.Length <= 5
+                                )
+                                estado = true;
+
+                    }//FIN DE BUSQUEDA DEL IDENTIFICADOR DEL CURSOR
+                    token = IdCursor;
+                    caracter = "";
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") || (linea.Substring(i + 1, 1).Equals("=") && caracter != " ")
+                        || (linea.Substring(i + 1, 1).Equals(",") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals(":") && caracter != ""))
+
+                    {
+                        caracter = "";
+
+                    }
+                }
+
+            }
+
+            return token;
+        }
+
+
+
+        public List<String> buscaArreglo(String linea, String[] lista, int contadorLineas)
+        {
+           
+
+
+            String caracter = "";
+            String comentarios = "";
+            Boolean valida_comillas = false;
+
+            List<String> tokens = new List<String>();
+            try {
+                if (linea != String.Empty)
+                {
+                    if (linea.Substring(0, 1) != "#")
+                    {
+                        for (int i = 0; i < linea.Length; i++)
+                        {
+
+
+                            if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                            {
+
+                                if (linea.Substring(i, 1) == "#")
+                                    break;
+
+                                caracter += linea.Substring(i, 1);
+                                //captura el indice del valor del caracter 
+                            }
+
+
+
+                            if (existeToken(caracter, lista))
+                            {
+
+                                string car = caracter.ToUpper();
+
+                                if (car.Equals("ERROR"))
+                                {
+
+
+
+                                    
+                                        for (int j = (i - caracter.Length); i > 0; j--)
+                                        {
+
+                                            if (linea.Substring(j, 1) != " " && linea.Substring(j, 1) != "\t")
+                                            {
+                                                comentarios += linea.Substring(j, 1);
+                                                if (comentarios == "\"")
+                                                {
+                                                    valida_comillas = true;
+                                                    break;
+                                                }
+
+
+                                            }
+                                        }
+                                   
+                                }
+
+                                if (!valida_comillas)
+                                {
+                                    tokens.Add(caracter);
+                                    caracter = "";
+                                }
+
+
+                            }
+
+                            //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                            //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                            if ((i + 1) < linea.Length)
+                            {
+                                //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+                                if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") ||
+                                    (linea.Substring(i + 1, 1).Equals("=") && caracter != "") ||
+                                    (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                                    )
+                                {
+                                    caracter = "";
+                                }
+                            }
+
+
+                        }
+                    }
+                }
+        } catch(Exception e){
+                Console.Write(e.Message);
+        }
+            return tokens;
+            
+        }
+
+        private void buscaForval(int numLinea ,string linea)
+        {
+
+                //string cad1 = "";
+           // cad1 = BuscaLinea(numLinea);
+            linea = linea.ToUpper();
+            int con = numLinea;
+            //int contadorInicio = 0;
+            //int contadorFin = 0;
+
+            Boolean estado = false;
+
+            //CASO PARA LAS SENTENCIAS REPETITIVAS DONDE ESTE EL USO DE FOREACH
+            if ((linea.Contains("WHILE")) && (!linea.Contains("END")))
+                //SENTENCIAS REPETITIAS 
+            {
+
+                //contadorInicio++;
+                linea = BuscaLinea(con).ToUpper();
+                iniForval = con;
+
+                estado = true;
+            }
+            else
+            {
+                estado = false;
+            }
+
+            if (estado == true) {
+                Console.Write("entro");
+            }
+
+
+            if ((linea.Contains("END WHILE"))
+                 && estado == false
+                 )
+            {
+
+                //contadorFin++;
+                linea = BuscaLinea(con).ToUpper();
+                finForval = con;
+
+
+            }
+
+            if (iniForval != 0 && finForval != -1)
+            {
+                do
+                {
+                    iniForval++;
+                    linea = BuscaLinea(iniForval).ToUpper();
+                    if (linea.Contains("PREPARE") && linea.Contains("FROM"))
+                    //&& (numLinea > iniForEach || numLinea == finForEach)
+
+                    {
+                        ErrorBE cursor = new ErrorBE("SE ENCONTRO LA SENTENCIA PREPARE DENTRO DE UN FOREACH", iniForval);
+                        filegl.lista.Add(cursor);
+
+                    }
+                } while (iniForval != finForval);
+                finForval = -1;
+            }
+
+
+
+
+
+        }
+
+        public void encuentraArreglo(string linea, int contadorLineas)
+        {
+
+
+
+            ErrorBE error = new ErrorBE();
+            foreach (String i in arreglo_palabras)
+            {
+                if (i.Equals("PDQPRIORITY", StringComparison.OrdinalIgnoreCase))
+                {
+                    error = new ErrorBE("PDQPRIORITY", contadorLineas);
+                    filegl.lista.Add(error);
+                }
+                if (i.Equals("ERROR", StringComparison.OrdinalIgnoreCase))
+                {
+                    error = new ErrorBE("Se encontro Palabra reservada error verificar si es mensaje", contadorLineas);
+                    filegl.lista.Add(error);
+                }
+                if (i.Equals("ECHO", StringComparison.OrdinalIgnoreCase))
+                    {
+                    error = new ErrorBE("ECHO", contadorLineas);
+                    filegl.lista.Add(error);
+                }
+
+
+
+            }
+
+        }
+
+
+
+
+        public String buscarTbFisica(String linea, String palabrasReservadas)
+        {
+            String caracter = "";
+            String IdCursor = "";
+            String token = "";
+            Boolean estado = false;
+
+            for (int i = 0; i < linea.Length && !estado; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+                if (equalString(caracter, palabrasReservadas))
+                {
+                    //BUSCA IDENTIFICADOR 
+                    //INICIO
+                    for (int j = i + 1; j < linea.Length && !estado; j++)
+                    {
+
+                        if (linea.Substring(j, 1) != " " && linea.Substring(j, 1) != "\t"
+                            //&& (((Encoding.ASCII.GetBytes(linea.Substring(j, 1))[0]) >=65)  && ((Encoding.ASCII.GetBytes(linea.Substring(j, 1))[0]) < 91)) 
+                            && (((Encoding.ASCII.GetBytes(linea.Substring(j, 1))[0]) > 96) && ((Encoding.ASCII.GetBytes(linea.Substring(j, 1))[0]) <= 122))
+                            )
+                        {
+                            IdCursor += linea.Substring(j, 1);
+
+                        }
+                        if ((j + 1) < linea.Length)
+                            if ((linea.Substring(j + 1, 1) == "," && IdCursor != "")
+                                || (linea.Substring(j + 1, 1).Equals(" ") && caracter != "")
+                                )
+                                estado = true;
+
+                    }//FIN DE BUSQUEDA DEL IDENTIFICADOR DEL CURSOR
+                    token = IdCursor;
+                    caracter = "";
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") || (linea.Substring(i + 1, 1).Equals("=") && caracter != " ")
+                        || (linea.Substring(i + 1, 1).Equals(",") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals(":") && caracter != ""))
+
+                    {
+                        caracter = "";
+
+                    }
+                }
+
+            }
+
+            return token;
+        }
+
+
+
+        public String buscarIdentificador(String linea, String palabrasReservadas)
+        {
+            String caracter = "";
+            String IdCursor = "";
+            String token = "";
+            Boolean estado = false;
+
+            for (int i = 0; i < linea.Length && !estado; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+                if (equalString(caracter, palabrasReservadas))
+                {
+                    //BUSCA IDENTIFICADOR DEL CURSOR
+                    //INICIO
+                    for (int j = i + 1; j < linea.Length && !estado; j++)
+                    {
+
+                        if (linea.Substring(j, 1) != " " && linea.Substring(j, 1) != "\t")
+                        {
+                            IdCursor += linea.Substring(j, 1);
+
+                        }
+                        if ((j + 1) < linea.Length)
+                            if ((linea.Substring(j + 1, 1).Equals(" ") && caracter != "") || (linea.Substring(i + 1, 1).Equals("=") && caracter != "")
+                                || (linea.Substring(j + 1, 1).Equals(",") && caracter != "") ||
+                                     (linea.Substring(j + 1, 1).Equals("\t") && caracter != ""))
+                            {
+                                estado = true;
+
+                            }
+
+
+                    }//FIN DE BUSQUEDA DEL IDENTIFICADOR DEL CURSOR
+                    token = IdCursor;
+                    caracter = "";
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") || (linea.Substring(i + 1, 1).Equals("=") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals(",") && caracter != "") ||
+                         (linea.Substring(i + 1, 1).Equals("\t") && caracter != ""))
+                    {
+                        caracter = "";
+
+                    }
+                }
+
+            }
+
+            return token;
+        }
+
+
+        public String buscarCampos(String linea, String palabrasReservadas)
+        {
+            String caracter = "";
+            String IdCursor = "";
+            String token = "";
+            Boolean estado = false;
+            int n = 1;
+
+            for (int i = 0; i < linea.Length && !estado; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t"
+                    && linea.Substring(i, 1) != "." && linea.Substring(i, 1) != ","
+                    && linea.Substring(i, 1) != "("
+                    )
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+                if (equalString(caracter, palabrasReservadas))
+                {   //BUSCA IDENTIFICADOR 
+                    //INICIO
+                    for (int j = i + 1; j < linea.Length && !estado && n < 5; j++)
+                    {
+
+                        if (linea.Substring(j, 1) != " " && linea.Substring(j, 1) != "\t")
+                        {
+                            IdCursor += linea.Substring(j, 1);
+
+                        }
+                        if ((j + 1) < linea.Length)
+                            if ((linea.Substring(j + 1, 1).Equals(" ") && caracter != "")
+                                || (linea.Substring(j + 1, 1).Equals("=") && caracter != "")
+                                || (linea.Substring(j + 1, 1).Equals(",") && caracter != "") ||
+                                     (linea.Substring(j + 1, 1).Equals("\t") && caracter != "")
+                                 || (linea.Substring(j + 1, 1).Equals(".") && caracter != "")
+                                     )
+                            {
+                                estado = true;
+
+                            }
+                        n++;
+
+
+                    }//FIN DE BUSQUEDA DEL IDENTIFICADOR DEL CURSOR
+                    token = palabrasReservadas + IdCursor;
+                    caracter = "";
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals("=") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals(",") && caracter != "") ||
+                         (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                         || (linea.Substring(i + 1, 1).Equals(".") && caracter != "")
+                         || (linea.Substring(i + 1, 1).Equals("(") && caracter != ""))
+                    {
+                        caracter = "";
+
+                    }
+                }
+
+            }
+
+            return token;
+        }
+
+
+
+
+        public Boolean equalString(String cadena, String palabrasReservadas)
+        {
+            Boolean bandera = false;
+
+
+            if (cadena.Equals(palabrasReservadas, StringComparison.OrdinalIgnoreCase))
+            {
+                bandera = true;
+            }
+
+
+            return bandera;
+        }
+
+        public String buscarIdTemp(String linea, String palabrasReservadas)
+        {
+            String caracter = "";
+            String tokens = null;
+            Boolean estado = false;
+
+            for (int i = 0; i < linea.Length && !estado; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t" &&
+                    linea.Substring(i, 1) != ","
+                    //&& linea.Substring(i, 1) != "'"
+                    )
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+                if (equalString(caracter, palabrasReservadas))
+                {
+                    tokens = caracter;
+                    caracter = "";
+                    estado = true;
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals("=") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals(",") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals(":") && caracter != "")
+                        || (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+
+                        )
+                    {
+                        caracter = "";
+
+                    }
+                }
+            }
+
+            return tokens;
+
+        }
+
+        public String buscaPrimerToken(String linea)
+        {
+            String caracter = "";
+            Boolean ban = false;
+            int i = 0;
+            while (i < linea.Length && !ban)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+                    caracter += linea.Substring(i, 1);
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals(",") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                        )
+                        ban = true;
+                }
+
+                i++;
+            }
+
+            return caracter;
+        }
+
+        public String buscaPrimerCaracter(String linea)
+        {
+            String caracter = "";
+            Boolean ban = false;
+            int i = 0;
+            while (i < linea.Length && !ban)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+                    caracter = linea.Substring(i, 1);
+                    ban = true;
+                }
+                i++;
+            }
+
+            return caracter;
+        }
+
+        public String ultimoCaracter(String linea)
+        {
+
+            String caracter = "";
+
+            caracter = linea.Substring(linea.Length - 1, 1);
+
+
+
+            return caracter;
+        }
+
+        public List<String> buscarTokens(String linea, String[] palabrasReservadas)
+        {
+
+            String caracter = "";
+
+            List<String> tokens = new List<String>();
+
+            for (int i = 0; i < linea.Length; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+                if (existeToken(caracter, palabrasReservadas))
+                {
+                    tokens.Add(caracter);
+                    caracter = "";
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals("=") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals("\t") && caracter != "")
+                        )
+                    {
+                        caracter = "";
+                    }
+                }
+
+
+            }
+
+            return tokens;
+
+        }
+
+        public void encuentraGconst(string linea, int contadorLineas)
+        {
+
+
+            ErrorBE cursor = new ErrorBE();
+            foreach (String i in gconstEncontrados)
+            {
+                if (i.Equals("g_const", StringComparison.OrdinalIgnoreCase))
+                {
+                    cursor = new ErrorBE("g_const", contadorLineas);
+                    filegl.lista.Add(cursor);
+                }
+
+            }
+
+
+
+        }
+
+        //Metodos
+        public List<String> buscarIdentGconst(String linea, String[] x)
+        {
+
+            String caracter = "";
+
+
+            List<String> tokens = new List<String>();
+
+
+
+
+
+
+
+            for (int i = 0; i < linea.Length; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t"
+                && linea.Substring(i, 1) != ",")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+                if (existeToken(caracter, x))
+                {
+                    tokens.Add(caracter);
+                    caracter = "";
+
+                }
+
+
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != " ") || (linea.Substring(i + 1, 1).Equals("=") && caracter != " ")
+                        || (linea.Substring(i + 1, 1).Equals("g") && caracter != " ") || (linea.Substring(i + 1, 1).Equals("G") && caracter != " "))
+                    {
+                        caracter = "";
+                    }
+                }
+            }
+
+            return tokens;
+        }
+
+
+
+        public String buscarTokens(String linea, String palabrasReservadas)
+        {
+
+            String caracter = "";
+            String tokens = null;
+            Boolean estado = false;
+
+            for (int i = 0; i < linea.Length && !estado; i++)
+            {
+                if (linea.Substring(i, 1) != " " && linea.Substring(i, 1) != "\t" &&
+                    linea.Substring(i, 1) != ",")
+                {
+                    caracter += linea.Substring(i, 1);
+                }
+
+                if (equalString(caracter, palabrasReservadas))
+                {
+                    tokens = caracter;
+                    caracter = "";
+                    estado = true;
+
+
+                }
+
+                //SI LA PALABRA ALMACENADA ES UN IDENTIFICADOR Y EL SIGUIENTE CARACTER 
+                //ES UN ESPACIO EN BLANCO, LIMPIAR LA CADENA ALMACENADA HASTA EL MOMENTO
+                if ((i + 1) < linea.Length)
+                {
+                    //SI EL VALOR QUE LE SIGUE AL VALOR ALMACENADO EN CARACTER ES UN ESPACIO
+                    if ((linea.Substring(i + 1, 1).Equals(" ") && caracter != "") ||
+                        (linea.Substring(i + 1, 1).Equals("=") && caracter != "") ||
+                         (linea.Substring(i + 1, 1).Equals(",") && caracter != ""))
+                    {
+                        caracter = "";
+
+                    }
+                }
+            }
+
+            return tokens;
+
+        }
+
+
+
+    }
+}
+
