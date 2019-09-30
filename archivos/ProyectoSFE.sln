@@ -1,0 +1,83 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SFE.UI", "SFE.UI\SFE.UI.csproj", "{8BCD6297-987B-413B-BC76-CCA625790E89}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SFE.WebAPI", "SFE.WebAPI\SFE.WebAPI.csproj", "{2737CE59-2E5D-497A-BACA-6972422EC266}"
+	ProjectSection(ProjectDependencies) = postProject
+		{952EBC9E-FFEA-4A4F-85B8-1A9383C1E74B} = {952EBC9E-FFEA-4A4F-85B8-1A9383C1E74B}
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SFE.Entity", "SFE.Entity\SFE.Entity.csproj", "{0E304DA9-9EF8-4B82-B2F4-CC993E82FCF7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ServiceFE", "ServiceFE\ServiceFE.csproj", "{952EBC9E-FFEA-4A4F-85B8-1A9383C1E74B}"
+EndProject
+Project("{F14B399A-7131-4C87-9E4B-1186C45EF12D}") = "SFE.Reports", "SFE.Reports\SFE.Reports.rptproj", "{47673F51-AD5F-4259-B1C3-09527DFB36A2}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		DebugLocal|Any CPU = DebugLocal|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8BCD6297-987B-413B-BC76-CCA625790E89}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8BCD6297-987B-413B-BC76-CCA625790E89}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8BCD6297-987B-413B-BC76-CCA625790E89}.DebugLocal|Any CPU.ActiveCfg = Debug|Any CPU
+		{8BCD6297-987B-413B-BC76-CCA625790E89}.DebugLocal|Any CPU.Build.0 = Debug|Any CPU
+		{8BCD6297-987B-413B-BC76-CCA625790E89}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8BCD6297-987B-413B-BC76-CCA625790E89}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2737CE59-2E5D-497A-BACA-6972422EC266}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2737CE59-2E5D-497A-BACA-6972422EC266}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2737CE59-2E5D-497A-BACA-6972422EC266}.DebugLocal|Any CPU.ActiveCfg = Debug|Any CPU
+		{2737CE59-2E5D-497A-BACA-6972422EC266}.DebugLocal|Any CPU.Build.0 = Debug|Any CPU
+		{2737CE59-2E5D-497A-BACA-6972422EC266}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2737CE59-2E5D-497A-BACA-6972422EC266}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0E304DA9-9EF8-4B82-B2F4-CC993E82FCF7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E304DA9-9EF8-4B82-B2F4-CC993E82FCF7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E304DA9-9EF8-4B82-B2F4-CC993E82FCF7}.DebugLocal|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E304DA9-9EF8-4B82-B2F4-CC993E82FCF7}.DebugLocal|Any CPU.Build.0 = Debug|Any CPU
+		{0E304DA9-9EF8-4B82-B2F4-CC993E82FCF7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E304DA9-9EF8-4B82-B2F4-CC993E82FCF7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{952EBC9E-FFEA-4A4F-85B8-1A9383C1E74B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{952EBC9E-FFEA-4A4F-85B8-1A9383C1E74B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{952EBC9E-FFEA-4A4F-85B8-1A9383C1E74B}.DebugLocal|Any CPU.ActiveCfg = Debug|Any CPU
+		{952EBC9E-FFEA-4A4F-85B8-1A9383C1E74B}.DebugLocal|Any CPU.Build.0 = Debug|Any CPU
+		{952EBC9E-FFEA-4A4F-85B8-1A9383C1E74B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{952EBC9E-FFEA-4A4F-85B8-1A9383C1E74B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{47673F51-AD5F-4259-B1C3-09527DFB36A2}.Debug|Any CPU.ActiveCfg = Debug
+		{47673F51-AD5F-4259-B1C3-09527DFB36A2}.Debug|Any CPU.Build.0 = Debug
+		{47673F51-AD5F-4259-B1C3-09527DFB36A2}.Debug|Any CPU.Deploy.0 = Debug
+		{47673F51-AD5F-4259-B1C3-09527DFB36A2}.DebugLocal|Any CPU.ActiveCfg = DebugLocal
+		{47673F51-AD5F-4259-B1C3-09527DFB36A2}.DebugLocal|Any CPU.Build.0 = DebugLocal
+		{47673F51-AD5F-4259-B1C3-09527DFB36A2}.Release|Any CPU.ActiveCfg = Release
+		{47673F51-AD5F-4259-B1C3-09527DFB36A2}.Release|Any CPU.Build.0 = Release
+		{47673F51-AD5F-4259-B1C3-09527DFB36A2}.Release|Any CPU.Deploy.0 = Release
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(TeamFoundationVersionControl) = preSolution
+		SccNumberOfProjects = 6
+		SccEnterpriseProvider = {4CA58AB2-18FA-4F8D-95D4-32DDF27D184C}
+		SccTeamFoundationServer = http://tfs.sesnetperu.com:8082/tfs/aps
+		SccLocalPath0 = .
+		SccProjectUniqueName1 = SFE.Entity\\SFE.Entity.csproj
+		SccProjectName1 = SFE.Entity
+		SccLocalPath1 = SFE.Entity
+		SccProjectUniqueName2 = SFE.UI\\SFE.UI.csproj
+		SccProjectName2 = SFE.UI
+		SccLocalPath2 = SFE.UI
+		SccProjectUniqueName3 = SFE.WebAPI\\SFE.WebAPI.csproj
+		SccProjectName3 = SFE.WebAPI
+		SccLocalPath3 = SFE.WebAPI
+		SccProjectUniqueName4 = ServiceFE\\ServiceFE.csproj
+		SccProjectName4 = ServiceFE
+		SccLocalPath4 = ServiceFE
+		SccProjectUniqueName5 = SFE.Reports\\SFE.Reports.rptproj
+		SccProjectName5 = SFE.Reports
+		SccLocalPath5 = SFE.Reports
+	EndGlobalSection
+EndGlobal
